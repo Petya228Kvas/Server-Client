@@ -1,88 +1,71 @@
-﻿#include <iostream>
+#include <iostream>
 #include <WinSock2.h>
 #pragma comment(lib, "ws2_32.lib")
 #include <string>
 #include <vector>
+#include <thread>
+#include <mutex>
 #pragma warning(disable:4996)
 
 using namespace std;
 
 vector<SOCKET> Users_Connected;
-int counter;
+mutex mtx;
+int counter = 0;
 
 
-enum Packet {
-	P_ChatMessage
-};
 
-bool ProcessPacket(int index, Packet packettype) {
-	switch (packettype){
-	case P_ChatMessage:
-	{
+void ClientHandler(SOCKET clientsocket) {
+
+	while (true) {
 		int msg_size = 0;
-		int result = recv(Users_Connected[index], (char*)&msg_size, sizeof(int), NULL);//принятие размера сообщения
-
+		int result = recv(clientsocket, (char*)&msg_size, sizeof(int), NULL);//принятие размера сообщения
 		if (result <= 0) {
-			cout << "User" << index << "disconected or error.";
-			closesocket(Users_Connected[index]);
-			Users_Connected.erase(Users_Connected.begin() + index);
+			cout << "User " << clientsocket << " disconected or error.";
+			mtx.lock();
+			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
+				if (*it == clientsocket) {
+					Users_Connected.erase(it);
+					break;
+				}
+			}
 			counter--;
-			return false;
+			mtx.unlock();
+			closesocket(clientsocket);
+			break;
 		}
-
 		char* msg = new char[msg_size + 1];//выделение памяти под сообщение
 		msg[msg_size] = '\0';// для конца строки
-		result = recv(Users_Connected[index], msg, msg_size, NULL);//Принятие самого сообщения
-
+		result = recv(clientsocket, msg, msg_size, NULL);//Принятие самого сообщения ///////Точка ошибки
 		if (result <= 0) {
-			cout << "User" << index << "disconected or error." << endl;
-			closesocket(Users_Connected[index]);
-			Users_Connected.erase(Users_Connected.begin() + index);
+			cout << "User " << clientsocket << " disconected or error." << endl;
+			mtx.lock();
+			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
+				if (*it == clientsocket) {
+					Users_Connected.erase(it);
+					break;
+				}
+			}
 			counter--;
+			mtx.unlock();
+			closesocket(clientsocket);
 			delete[] msg;
-			return false;
+			break;
 		}
-
-		for (int i = 0; i < counter; i++) {
-			if (i == index ) continue;
-			if (Users_Connected[i] == INVALID_SOCKET) continue;
-			Packet msgpacket = P_ChatMessage;
-			send(Users_Connected[i], (char*)&msgpacket, sizeof(Packet), NULL);
-			send(Users_Connected[i], (char*)&msg_size, sizeof(int), NULL);//отправка размера сообщения
-			send(Users_Connected[i], msg, msg_size, NULL);//отправка сообщения
+		mtx.lock();
+		for (SOCKET other_client : Users_Connected) {
+			if (other_client == clientsocket) continue;
+			if (other_client == INVALID_SOCKET) continue;
+			send(other_client, (char*)&msg_size, sizeof(int), NULL);//отправка размера сообщения
+			send(other_client, msg, msg_size, NULL);//отправка сообщения
 		}
+		mtx.unlock();
 		delete[] msg;
-		break;
 	}
-	default:
-		cout << "Unknown packet: " << packettype << endl;
-	}
-	return true;
-}
 
-void ClientHandler(int index) {
-
-	Packet packettype;
-	while (true) {
-		int result = recv(Users_Connected[index], (char*)&packettype, sizeof(Packet), NULL);
-		if (result <= 0) {
-			cout << "User " << index << " disconected or error."<< endl;
-			closesocket(Users_Connected[index]);
-			Users_Connected.erase(Users_Connected.begin() + index);
-			counter--;
-			break;
-		}
-		if (!ProcessPacket(index, packettype)) {
-			break;
-		}
-	}
-	//closesocket(Users_Connected[index]);
 }
 
 int main() {
-
-	
-
 
 	WSAData wsadata;
 	WORD WinSockVer = MAKEWORD(2, 2);
@@ -102,20 +85,24 @@ int main() {
 	bind(slisten, (SOCKADDR*)&addr, sizeof(addr));
 	listen(slisten, SOMAXCONN);
 	cout << "Server start listen client..." << endl;
-	
+
 	SOCKET newconnection;
-	while(true) {
+	vector<thread> client_threads;
+	while (true) {
 		newconnection = accept(slisten, (SOCKADDR*)&addr, &size_of_len);
 		if (newconnection == INVALID_SOCKET)
 			cout << "User is not connected." << endl;
 		else {
 			cout << "New User connected." << endl;
+			mtx.lock();
 			Users_Connected.push_back(newconnection);
 			counter++;
-			CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ClientHandler, LPVOID(counter-1), NULL, NULL);
+			mtx.unlock();
+			client_threads.emplace_back(ClientHandler, newconnection);
+			client_threads.back().detach();
 		}
 	}
-	
+
 	WaitForMultipleObjects(counter, NULL, TRUE, INFINITY);
 	closesocket(slisten);
 	WSACleanup();
