@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <cstring>
 #pragma warning(disable:4996)
 
 using namespace std;
@@ -21,7 +22,7 @@ void ClientHandler(SOCKET clientsocket) {
 		int msg_size = 0;
 		int result = recv(clientsocket, (char*)&msg_size, sizeof(int), NULL);//принятие размера сообщения
 		if (result <= 0) {
-			cout << "User " << clientsocket << " disconected or error.";
+			cout << "User " << clientsocket << " disconected or error." << endl;
 			mtx.lock();
 			for (auto it = Users_Connected.begin(); it != Users_Connected.end(); ++it) {
 				if (*it == clientsocket) {
@@ -65,13 +66,54 @@ void ClientHandler(SOCKET clientsocket) {
 
 }
 
+string recv(SOCKET client) {
+	int msg_size_recv = 0;
+	recv(client, (char*)&msg_size_recv, sizeof(int), NULL);
+	char* msg_recv = new char[msg_size_recv + 1];
+	recv(client, msg_recv, msg_size_recv, NULL);
+	msg_recv[msg_size_recv] = '\0';
+	string receivedPassword(msg_recv);
+	delete[] msg_recv;
+	return receivedPassword;
+}
+
+void send(SOCKET client, string msg) {
+	size_t msg_size_send = msg.size();
+	send(client, (char*)&msg_size_send, sizeof(int), NULL);
+	send(client, msg.c_str(), msg_size_send, NULL);
+}
+
+bool RecvPassword(SOCKET client) {
+	const int maxAttempts = 4;
+	string msg = "Hello, to enter the chat enter the password: ";
+	send(client, msg);
+	for (int current = 1; current != maxAttempts; ++current) {
+		if (recv(client) == "ban") {
+			send(client, "Password true! You have access to chat.");
+			return true;
+		}
+		else {
+			if (current <= maxAttempts) {
+				int attempt_left = maxAttempts - current;
+				string msg_attempt = to_string(attempt_left) + " attempt(s) left. Try again: ";
+				send(client, msg_attempt);
+			}
+			
+		}
+	}
+	send(client, "All attempts are wasted.");
+	return false;
+}
+
+
+
 int main() {
 
 	WSAData wsadata;
 	WORD WinSockVer = MAKEWORD(2, 2);
 
 	if (WSAStartup(WinSockVer, &wsadata) != 0) {
-		cout << "Error";
+		cout << "Error" << endl;
 		exit(1);
 	}
 
@@ -82,24 +124,33 @@ int main() {
 	addr.sin_family = AF_INET;
 
 	SOCKET slisten = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	bind(slisten, (SOCKADDR*)&addr, sizeof(addr));
-	listen(slisten, SOMAXCONN);
+	if (bind(slisten, (SOCKADDR*)&addr, sizeof(addr)) == SOCKET_ERROR)
+		cout<< "Bind ERROR."<<endl;
+	if (listen(slisten, SOMAXCONN) == SOCKET_ERROR)
+		cout << "Listen ERROR." << endl;
 	cout << "Server start listen client..." << endl;
 
 	SOCKET newconnection;
 	vector<thread> client_threads;
 	while (true) {
 		newconnection = accept(slisten, (SOCKADDR*)&addr, &size_of_len);
-		if (newconnection == INVALID_SOCKET)
-			cout << "User is not connected." << endl;
+		
+		if (!RecvPassword(newconnection)) {
+			closesocket(newconnection);
+		}
 		else {
-			cout << "New User connected." << endl;
-			mtx.lock();
-			Users_Connected.push_back(newconnection);
-			counter++;
-			mtx.unlock();
-			client_threads.emplace_back(ClientHandler, newconnection);
-			client_threads.back().detach();
+
+			if (newconnection == INVALID_SOCKET)
+				cout << "User is not connected." << endl;
+			else {
+				cout << "New User connected." << endl;
+				mtx.lock();
+				Users_Connected.push_back(newconnection);
+				counter++;
+				mtx.unlock();
+				client_threads.emplace_back(ClientHandler, newconnection);
+				client_threads.back().detach();
+			}
 		}
 	}
 
