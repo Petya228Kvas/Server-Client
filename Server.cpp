@@ -125,6 +125,7 @@ void ClientHandler(SOCKET clientsocket) {
 		for (SOCKET other_client : Users_Connected) {
 			if (other_client == clientsocket) continue;
 			if (other_client == INVALID_SOCKET) continue;
+			send(other_client, id_client + ":");
 			send(other_client, (char*)&msg_size, sizeof(int), NULL);//отправка размера сообщения
 			send(other_client, msg, msg_size, NULL);//отправка сообщения
 		}
