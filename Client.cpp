@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #pragma comment(lib, "ws2_32.lib")
 #pragma warning(disable: 4996)
 #include <WinSock2.h>
@@ -75,8 +75,6 @@ int main() {
 			cout << "Connection is invalid." << endl;
 			break;
 		}
-
-
 		getline(cin, umsg);
 		if (umsg.empty()) {
 			continue;
